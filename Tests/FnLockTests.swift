@@ -32,6 +32,26 @@ enum FnLockTests {
             }
         }
 
+        suite.run("FnLockSupport.formsAgreeOnTheFunctionKey") {
+            // One physical key may arrive as a plain media keycode or as an
+            // NX id (external keyboards post brightness as 144/145, the
+            // Intel backlight rows post F5/F6 as NX 22/21); the dedup
+            // window keys on the translated function key, so both forward
+            // tables must answer to the same one.
+            let pairs: [(plain: Int, nx: Int32)] = [
+                (plain: 145, nx: 3),   // brightness down
+                (plain: 144, nx: 2),   // brightness up
+                (plain: 176, nx: 22),  // F5: Dictation on this row, backlight down on Intel rows
+                (plain: 178, nx: 21),  // F6: Focus on this row, backlight up on Intel rows
+            ]
+            for pair in pairs {
+                let fromPlain = FnLockSupport.mediaKeyDownToFunction[pair.plain]
+                let fromNX = FnLockSupport.nxKeyToFunction[pair.nx]
+                suite.expect(fromPlain != nil && fromPlain == fromNX,
+                              "plain \(pair.plain) and NX \(pair.nx) translate to one function key")
+            }
+        }
+
         suite.run("FnLockSupport.probeMeasuredKeyCodes") {
             // The Apple-silicon function row as the probe measured it.
             suite.expect(FnLockSupport.mediaKeyDownToFunction[160] == Int(kVK_F3),

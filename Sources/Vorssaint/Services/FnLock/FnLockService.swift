@@ -298,6 +298,16 @@ final class FnLockService: ObservableObject {
         case .passThrough:
             return Unmanaged.passUnretained(event)
         case .rewrite(let target):
+            // The NX form of one press may have been translated first and
+            // this plain form is its echo, so it is consumed rather than
+            // delivered twice. Only the down is deduped; a release always
+            // goes through, so it can complete the pair. The window keys
+            // on the translated function key, the same key the NX side
+            // records, so both forms of one press answer to one entry.
+            let now = ProcessInfo.processInfo.systemUptime
+            let blocked = forward && isKeyDown
+                && stateLock.withLock { dedup.blocks(functionKey: target, at: now) }
+            if blocked { return nil }
             event.setIntegerValueField(.keyboardEventKeycode, value: Int64(target))
             var flags = event.flags
             flags.insert(.maskSecondaryFn)
@@ -308,9 +318,7 @@ final class FnLockService: ObservableObject {
                 stateLock.withLock { translatedPresses[keyCode] = target }
             }
             if forward {
-                stateLock.withLock {
-                    dedup.record(functionKey: keyCode, at: ProcessInfo.processInfo.systemUptime)
-                }
+                stateLock.withLock { dedup.record(functionKey: target, at: now) }
             }
             return Unmanaged.passUnretained(event)
         case .postMediaDown(let nxKey):
