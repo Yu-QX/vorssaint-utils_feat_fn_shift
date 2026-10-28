@@ -333,7 +333,7 @@ final class FnLockService: ObservableObject {
             // direction the hardware posts the plain function key alone, so
             // there is no second form to drop and a reverse entry would only
             // be able to block a forward press of the same key.
-            stateLock.withLock { pendingMediaUps.insert(nxKey) }
+            stateLock.withLock { _ = pendingMediaUps.insert(nxKey) }
             recordTranslation(source: .keyCode(keyCode), target: .nxKey(nxKey), isKeyDown: true)
             let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
             FnLockKeyEvents.mediaEvent(nxKey: nxKey, isKeyDown: true,
