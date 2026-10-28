@@ -157,7 +157,9 @@ final class BrightnessService: ObservableObject {
     /// the tap so the tap thread never reads published state.
     private var overlayReplacesNativeOSD = false
     /// Where a plain key press lands, sampled the same way: the display under
-    /// the pointer, or the one the system's own keys move.
+    /// the pointer, or the one the system's own keys move. The media-key
+    /// listener reads the target half too, so the two delivery forms agree
+    /// on what the system's own keys would move.
     private var functionKeysFollowPointer = false
     private var functionKeySystemTarget: CGDirectDisplayID?
     /// The chosen key step, sampled the same way, for the presses this app
@@ -1221,7 +1223,15 @@ final class BrightnessService: ObservableObject {
         // light keys, the function-key listener for the ordinary presses other
         // keyboards send. The tap itself comes up when any listener wants it.
         if wanted {
-            keyThreadLock.withLock { overlayReplacesNativeOSD = wantsBrightnessOSD }
+            // Sampled here like the plain-press listener below, so the tap
+            // thread never reads the published displays. Both listeners
+            // share the same snapshot, because the display the system's own
+            // keys move is one answer for both delivery forms.
+            let systemTarget = systemKeyTarget?.id
+            keyThreadLock.withLock {
+                overlayReplacesNativeOSD = wantsBrightnessOSD
+                functionKeySystemTarget = systemTarget
+            }
             FunctionKeyTap.shared.addListener(
                 named: Self.mediaKeysListener, priority: 20) { [weak self] type, event in
                 guard let self else { return Unmanaged.passUnretained(event) }
@@ -1593,7 +1603,9 @@ final class BrightnessService: ObservableObject {
             DispatchQueue.main.async { Self.postSystemQuarterSteps(increase: increases, count: count) }
             return nil
         }
-        let wantsBrightnessOSD = keyThreadLock.withLock { overlayReplacesNativeOSD }
+        let (wantsBrightnessOSD, keySystemTarget) = keyThreadLock.withLock {
+            (overlayReplacesNativeOSD, functionKeySystemTarget)
+        }
         let displayID: CGDirectDisplayID
         if followsPointer {
             // The pointer position is a display-server read; the screen list
@@ -1609,10 +1621,10 @@ final class BrightnessService: ObservableObject {
                 return leaveToSystem()
             }
             displayID = candidate
-        } else if wantsBrightnessOSD, let systemTarget = systemKeyTarget {
+        } else if wantsBrightnessOSD, let systemTarget = keySystemTarget {
             // With pointer routing off, keep the native target. In clamshell
             // mode this can be a system-managed external display.
-            displayID = systemTarget.id
+            displayID = systemTarget
         } else {
             return leaveToSystem()
         }
@@ -1630,12 +1642,11 @@ final class BrightnessService: ObservableObject {
             // The published list can lag a rebuild by a beat; resolve the
             // panel kind from the display server so a press never lands on
             // the wrong side of the built-in check.
-            let isBuiltIn = displays.first(where: { $0.id == displayID })?.isBuiltIn
-                ?? (CGDisplayIsBuiltin(displayID) != 0)
+            let isBuiltIn = CGDisplayIsBuiltin(displayID) != 0
             guard BrightnessSupport.stepsSystemRoutedDisplay(
                 followsPointer: followsPointer,
                 displayIsBuiltIn: isBuiltIn,
-                overlayReplacesNative: wantsBrightnessOSD && brightnessOSDSupported
+                overlayReplacesNative: wantsBrightnessOSD
             ), BrightnessBridge.setBrightness != nil else {
                 // The built-in panel keeps the system's native brightness
                 // handling and animation unless the overlay replaces it.
