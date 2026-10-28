@@ -38,9 +38,8 @@ final class MouseAppExceptions: ObservableObject {
     @Published private(set) var runningScopes = Set<MouseExceptionScope>()
     /// The scopes whose list contains the app in front right now, published
     /// on the main thread whenever that app changes (issue #1227). The
-    /// feature that follows the frontmost app observes this and
-    /// the event taps ask the same answer through `frontmostAppMatches`,
-    /// which reads a lock-guarded snapshot and never touches AppKit.
+    /// feature that follows the frontmost app observes this and mirrors the
+    /// answer behind its own lock for the tap thread to read.
     @Published private(set) var frontmostScopes = Set<MouseExceptionScope>()
 
     /// The same lists as sets, for the lookups the taps make. Under `lock`.
@@ -56,9 +55,6 @@ final class MouseAppExceptions: ObservableObject {
     private var sourceProcessIDs: [MouseExceptionScope: Set<Int32>] = [:]
     private var trackedSourceScopes: Set<MouseExceptionScope> = []
     private var runningApplicationsObservation: NSKeyValueObservation?
-    /// The mirror of `frontmostScopes` the event taps read under `lock`;
-    /// written on the main thread by `refreshFrontmostApp`.
-    private var frontmostMatchesSnapshot = Set<MouseExceptionScope>()
     /// Watches the app in front while any frontmost-keyed scope has a list.
     private var frontmostObserver: NSObjectProtocol?
 
@@ -116,13 +112,6 @@ final class MouseAppExceptions: ObservableObject {
 
     // MARK: - The app in front (issue #1227)
 
-    /// True when the app in front is on this feature's list. Safe from any
-    /// event tap: it reads the snapshot the main thread keeps fresh and
-    /// never touches AppKit, so a keystroke never waits on the main thread.
-    func frontmostAppMatches(_ scope: MouseExceptionScope) -> Bool {
-        lock.withLock { frontmostMatchesSnapshot.contains(scope) }
-    }
-
     /// The scopes that key off the app in front and currently hold a list,
     /// so the workspace observer runs only while one of them can answer.
     private var frontmostTrackingScopes: Set<MouseExceptionScope> {
@@ -151,7 +140,6 @@ final class MouseAppExceptions: ObservableObject {
                 matches.insert(scope)
             }
         }
-        lock.withLock { frontmostMatchesSnapshot = matches }
         if frontmostScopes != matches { frontmostScopes = matches }
     }
 
@@ -164,7 +152,6 @@ final class MouseAppExceptions: ObservableObject {
                 NSWorkspace.shared.notificationCenter.removeObserver(frontmostObserver)
                 self.frontmostObserver = nil
             }
-            lock.withLock { frontmostMatchesSnapshot = [] }
             if !frontmostScopes.isEmpty { frontmostScopes = [] }
             return
         }
