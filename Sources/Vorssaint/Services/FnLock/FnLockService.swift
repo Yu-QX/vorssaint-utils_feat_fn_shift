@@ -322,10 +322,11 @@ final class FnLockService: ObservableObject {
             }
             return Unmanaged.passUnretained(event)
         case .postMediaDown(let nxKey):
-            stateLock.withLock {
-                pendingMediaUps.insert(nxKey)
-                dedup.record(functionKey: keyCode, at: ProcessInfo.processInfo.systemUptime)
-            }
+            // The dedup window stays a forward-direction guard only: in this
+            // direction the hardware posts the plain function key alone, so
+            // there is no second form to drop and a reverse entry would only
+            // be able to block a forward press of the same key.
+            stateLock.withLock { pendingMediaUps.insert(nxKey) }
             recordTranslation(source: .keyCode(keyCode), target: .nxKey(nxKey), isKeyDown: true)
             let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
             FnLockKeyEvents.mediaEvent(nxKey: nxKey, isKeyDown: true,
