@@ -179,19 +179,26 @@ final class FnLockService: ObservableObject {
     /// picked up on the next frontmost change at the latest. Main thread.
     private func syncEngagement() {
         let engaged = MouseAppExceptions.shared.frontmostScopes.contains(.fnLock)
+        var directionFlipped = false
         let wasEngaged = stateLock.withLock { () -> Bool in
             let was = engagedSnapshot
+            let wasForward = systemFunctionKeysDefault
             engagedSnapshot = engaged
             systemFunctionKeysDefault = FnLockSupport.systemFunctionKeysDefault()
+            directionFlipped = wasForward != systemFunctionKeysDefault
             return was
         }
         if engagesFrontmostApp != engaged { engagesFrontmostApp = engaged }
-        if wasEngaged && !engaged { flushPendingReleases() }
+        if wasEngaged && (!engaged || directionFlipped) { flushPendingReleases() }
     }
 
-    /// Posts the releases of any press that went out under an engagement that
-    /// has since ended, so the app in front never holds a key down that no
-    /// one will release. Main thread.
+    /// Posts the releases of any press whose engagement ended or whose
+    /// direction flipped while it was held. Ending the engagement leaves the
+    /// app holding a translated key whose hardware release then goes to the
+    /// system, and flipping the system's own checkbox makes the hardware
+    /// send the release in the other delivery form, which the tables cannot
+    /// pair with the press they translated. Flushing completes both halves.
+    /// Main thread.
     private func flushPendingReleases() {
         let (keyUps, mediaUps, rewritten) = stateLock.withLock { () -> (Set<Int>, Set<Int32>, [Int: Int]) in
             let keyUps = pendingFunctionKeyUps
